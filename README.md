@@ -1,6 +1,6 @@
 # Brave Search MCP Server
 
-An MCP server implementation that integrates the Brave Search API, providing comprehensive search capabilities including web search, local business search, place search, image search, video search, news search, LLM context, and AI-powered summarization. This project supports both STDIO and HTTP transports, with STDIO as the default mode.
+An MCP server implementation that integrates the Brave Search API, providing comprehensive search capabilities including web search, local business search, place search, image search, video search, news search, LLM context, grounded Answers, and legacy AI summarization. This project supports both STDIO and HTTP transports, with STDIO as the default mode.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/brave/brave-search-mcp-server)
 
@@ -15,6 +15,38 @@ To follow established MCP conventions, the server now defaults to STDIO. If you 
 #### Response structure of `brave_image_search`
 
 Version 1.x of the MCP server would return base64-encoded image data along with image URLs. This dramatically slowed down the response, as well as consumed unnecessarily context in the session. Version 2.x removes the base64-encoded data, and returns a response object that more closely reflects the original Brave Search API response. The updated output schema is defined in [`src/tools/images/schemas/output.ts`](https://github.com/brave/brave-search-mcp-server/blob/main/src/tools/images/schemas/output.ts).
+
+### Summarizer to Answers
+
+`brave_summarizer` is **deprecated**. It remains available for existing Pro AI subscribers, but new integrations should use [`brave_answers`](#answers-brave_answers) instead.
+
+**Why migrate to Answers:**
+
+- Single request — no `brave_web_search` + summary key + `brave_summarizer` polling workflow
+- Optional inline citations (`enable_citations`) and multi-search research mode (`enable_research`)
+- Returns a finished, web-grounded answer rather than raw search results to summarize
+
+**Before (2 calls):**
+
+1. `brave_web_search({ query: "...", summary: true })` — extract the summarizer key from the response
+2. `brave_summarizer({ key: "..." })`
+
+**After (1 call):**
+
+```json
+{
+  "query": "...",
+  "enable_citations": true
+}
+```
+
+**Parameter mapping:**
+
+| Summarizer | Answers |
+|---|---|
+| `inline_references: true` | `enable_citations: true` |
+
+**Subscription note:** Summarizer requires a **Pro AI** plan. Answers requires an [**Answers plan**](https://api-dashboard.search.brave.com/app/subscriptions/subscribe).
 
 ## Tools
 
@@ -36,7 +68,7 @@ Performs comprehensive web searches with rich result types and advanced filterin
 - `goggles` (array, optional): Custom re-ranking definitions
 - `units` (string, optional): Measurement units ("metric" or "imperial")
 - `extra_snippets` (boolean, optional): Get additional excerpts (Pro plans only)
-- `summary` (boolean, optional): Enable summary key generation for AI summarization
+- `summary` (boolean, optional): Enable summary key generation for the deprecated `brave_summarizer` workflow; prefer `brave_answers` for new integrations
 
 ### Local Search (`brave_local_search`)
 Searches for local businesses and places with detailed information including ratings, hours, and AI-generated descriptions.
@@ -88,13 +120,43 @@ Searches for current news articles with freshness controls and breaking news ind
 - `extra_snippets` (boolean, optional): Get additional excerpts (Pro plans only)
 - `goggles` (array, optional): Custom re-ranking definitions
 
-### Summarizer Search (`brave_summarizer`)
+### Answers (`brave_answers`)
+Generates AI-grounded answers backed by real-time Brave Search using the [Answers API](https://api-dashboard.search.brave.com/api-reference/ai/answers) (`POST /res/v1/chat/completions`). Returns a finished answer as markdown rather than raw search results. **Preferred replacement for the deprecated `brave_summarizer` tool** — see [Summarizer to Answers](#summarizer-to-answers).
+
+**Parameters:** See the [Answers API reference](https://api-dashboard.search.brave.com/api-reference/ai/answers). Key fields include:
+- `query` (string, required): The question to answer. Sent to the API as the single user message
+- `model` (string, optional): Answers model (`brave` or `brave-pro`; omit to use the API default)
+- `country` (string, optional): Search country (2-letter code or `ALL`)
+- `language` (string, optional): Response language code (e.g. `en`)
+- `safesearch` (string, optional): `off`, `moderate`, or `strict`
+- `max_completion_tokens` (integer, optional): Upper bound on completion tokens. An answer cut off at this limit ends with a note saying so
+- `enable_citations` (boolean, optional): Inline citations, returned as markdown footnotes (not supported in research mode)
+- `enable_entities` (boolean, optional): Requests inline entity tags (not supported in research mode). The API has not been observed to return any, so this may have no effect
+- `enable_research` (boolean, optional): Multi-search research mode
+- `web_search_options` (object, optional): OpenAI-compatible options such as `search_context_size` (`low`, `medium`, `high`) and `user_location`
+
+**Research tuning** (when `enable_research=true`):
+- `research_maximum_number_of_tokens_per_query` (integer, optional, range: 1024-16384)
+- `research_maximum_number_of_queries` (integer, optional, range: 1-50)
+- `research_maximum_number_of_iterations` (integer, optional, range: 1-5)
+- `research_maximum_number_of_seconds` (integer, optional, range: 1-300)
+- `research_maximum_number_of_results_per_query` (integer, optional, range: 1-60)
+
+**Notes:**
+- Requires an Answers plan subscription.
+- The tool always requests a streamed (Server-Sent Events) response and returns the completed answer once the stream signals it is done. A stream that ends early or sends an error event is reported as an error. Unsupported option combinations are reported by the API as errors.
+- Research can take minutes. The tool sends MCP progress notifications while it waits, but clients that cap total request time (for example around 60 seconds) may need a lower `research_maximum_number_of_seconds`.
+
+### Summarizer Search (`brave_summarizer`) — Deprecated
+
+> **Deprecated:** Prefer [`brave_answers`](#answers-brave_answers) for new integrations. See [Summarizer to Answers](#summarizer-to-answers). This tool remains available for existing Pro AI subscribers.
+
 Generates AI-powered summaries from web search results using Brave's summarization API.
 
 **Parameters:**
 - `key` (string, required): Summary key from web search results (use `summary: true` in web search)
 - `entity_info` (boolean, optional): Include entity information (default: false)
-- `inline_references` (boolean, optional): Add source URL references (default: false)
+- `inline_references` (boolean, optional): Add source references, rendered as markdown footnotes (default: false)
 
 **Usage:** First perform a web search with `summary: true`, then use the returned summary key with this tool.
 
@@ -179,7 +241,7 @@ The server supports the following environment variables:
 - `BRAVE_MCP_LOG_LEVEL`: Desired logging level("debug", "info", "notice", "warning", "error", "critical", "alert", or "emergency", default: "info")
 - `BRAVE_MCP_ENABLED_TOOLS`: When used, specifies a space-separated whitelist for supported tools
 - `BRAVE_MCP_DISABLED_TOOLS`: When used, specifies a space-separated blacklist for supported tools
-- `BRAVE_MCP_STATELESS`: HTTP stateless mode (default: "true").  When running on Amazon Bedrock Agentcore, set to "true".
+- `BRAVE_MCP_STATELESS`: HTTP stateless mode (default: "false"). Must be "true" on Amazon Bedrock AgentCore, which sends its own `Mcp-Session-Id` with every request.
 
 ### Command Line Options
 
@@ -229,7 +291,7 @@ Add this to your `claude_desktop_config.json`:
   "mcpServers": {
     "brave-search": {
       "command": "npx",
-      "args": ["-y", "@brave/brave-search-mcp-server", "--transport", "http"],
+      "args": ["-y", "@brave/brave-search-mcp-server", "--transport", "stdio"],
       "env": {
         "BRAVE_API_KEY": "YOUR_API_KEY_HERE"
       }
@@ -295,6 +357,44 @@ For manual installation, add the following to your User Settings (JSON) or `.vsc
 }
 ```
 
+### Usage with fx
+
+Add this to your `~/.fx/mcp.json`, creating the file if it does not exist:
+
+#### Docker
+
+```json
+{
+  "mcp": {
+    "brave-search": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "BRAVE_API_KEY", "docker.io/mcp/brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "YOUR_API_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+#### NPX
+
+```json
+{
+  "mcp": {
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@brave/brave-search-mcp-server", "--transport", "stdio"],
+      "env": {
+        "BRAVE_API_KEY": "YOUR_API_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+Start fx, or type `/mcp reload` if it is already running. To verify the connection, type `/mcp list`.
+
 ## Build
 
 ### Docker
@@ -356,29 +456,40 @@ Add a reference to your local build in `claude_desktop_config.json`:
 
 ### Testing via MCP Inspector
 
-1. Build and start the server:
+The Inspector requires Node 22.19 or newer.
+
+**STDIO** — the Inspector launches the server itself, so one terminal is enough:
+
 ```bash
 npm run build
-node dist/index.js
-```
-
-2. In another terminal, start the MCP Inspector:
-```bash
 npx @modelcontextprotocol/inspector node dist/index.js
 ```
 
-STDIO is the default mode. For HTTP mode testing, add `--transport http` to the arguments in the Inspector UI.
+**HTTP** — the Inspector connects to a URL, so the server must already be listening:
+
+```bash
+# terminal 1
+npm run serve:http
+
+# terminal 2
+npm run inspector:http
+```
+
+`serve:http` builds, binds `127.0.0.1:8080`, and reads `BRAVE_API_KEY` from `.env`.
 
 ### Available Scripts
 
 - `npm run build`: Build the TypeScript project
 - `npm run watch`: Watch for changes and rebuild
+- `npm test`: Run the test suite
+- `npm run test:docker`: Build the Docker image and test it the way it is deployed: stdio (Docker MCP Catalog, Claude Desktop), HTTP (Docker Hub, compose, ECS), and Amazon Bedrock AgentCore. Requires Docker. To test an existing image instead, run `node --import tsx --test src/docker.e2e.ts` with `BRAVE_MCP_TEST_IMAGE` set.
 - `npm run format`: Format code with Prettier
 - `npm run format:check`: Check code formatting
 - `npm run prepare`: Format and build (runs automatically on npm install)
 
+- `npm run serve:http`: Build, then serve over HTTP at `http://127.0.0.1:8080/mcp`
 - `npm run inspector`: Launch an instance of MCP Inspector
-- `npm run inspector:stdio`: Launch a instance of MCP Inspector, configured for STDIO
+- `npm run inspector:http`: Launch MCP Inspector against `http://127.0.0.1:8080/mcp`
 
 ### Docker Compose
 

@@ -21,60 +21,44 @@ import type {
 } from '../tools/place_search/schemas/input.js';
 import type { PlaceSearchApiResponse } from '../tools/place_search/schemas/output.js';
 
-export interface RateLimitErrorResponse {
-  type: 'ErrorResponse';
-  error: {
-    id: string;
-    status: number;
-    code: 'RATE_LIMITED';
-    detail: string;
-    meta: {
-      plan: string;
-      rate_limit: number;
-      rate_current: number;
-      quota_limit: number;
-      quota_current: number;
-      component: 'rate_limiter';
-    };
-  };
-  time: number;
-}
+/** Request headers for endpoints that take none. */
+type NoRequestHeaders = Record<string, never>;
 
 export type Endpoints = {
   web: {
     params: WebQueryParams;
     response: WebSearchApiResponse;
-    requestHeaders: Headers;
+    requestHeaders: NoRequestHeaders;
   };
   images: {
     params: ImageQueryParams;
     response: ImageSearchApiResponse;
-    requestHeaders: Headers;
+    requestHeaders: NoRequestHeaders;
   };
   videos: {
     params: VideoQueryParams;
     response: VideoSearchApiResponse;
-    requestHeaders: Headers;
+    requestHeaders: NoRequestHeaders;
   };
   news: {
     params: NewsQueryParams;
     response: NewsSearchApiResponse;
-    requestHeaders: Headers;
+    requestHeaders: NoRequestHeaders;
   };
   localPois: {
     params: LocalPoisParams;
     response: LocalPoiSearchApiResponse;
-    requestHeaders: Headers;
+    requestHeaders: NoRequestHeaders;
   };
   localDescriptions: {
     params: LocalDescriptionsParams;
     response: LocalDescriptionsSearchApiResponse;
-    requestHeaders: Headers;
+    requestHeaders: NoRequestHeaders;
   };
   summarizer: {
     params: SummarizerQueryParams;
     response: SummarizerSearchApiResponse;
-    requestHeaders: Headers;
+    requestHeaders: NoRequestHeaders;
   };
   llmContext: {
     params: LlmQueryParams;

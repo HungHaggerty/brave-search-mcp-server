@@ -20,6 +20,11 @@ export const name = 'brave_web_search';
 
 export const annotations: ToolAnnotations = {
   title: 'Brave Web Search',
+  readOnlyHint: true,
+  // destructiveHint and idempotentHint are meaningful only when readOnlyHint is false.
+  // https://modelcontextprotocol.io/specification/2026-07-28/schema#toolannotations
+  destructiveHint: false,
+  idempotentHint: true,
   openWorldHint: true,
 };
 
@@ -63,13 +68,11 @@ export const execute = async (params: QueryParams) => {
   }
 
   // TODO (Sampson): The following is unnecessarily repetitive.
-  if (web && web.results?.length > 0) {
-    for (const entry of formatWebResults(web)) {
-      response.content.push({
-        type: 'text' as const,
-        text: stringify(entry),
-      });
-    }
+  for (const entry of formatWebResults(web)) {
+    response.content.push({
+      type: 'text' as const,
+      text: stringify(entry),
+    });
   }
 
   if (faq && faq.results?.length > 0) {

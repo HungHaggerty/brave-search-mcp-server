@@ -2,16 +2,24 @@ import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/
 import { summarizerQueryParams, type SummarizerQueryParams } from './params.js';
 import API from '../../BraveAPI/index.js';
 import { type SummarizerSearchApiResponse } from './types.js';
+import { formatSummary } from './format.js';
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 export const name = 'brave_summarizer';
 
 export const annotations: ToolAnnotations = {
   title: 'Brave Summarizer',
+  readOnlyHint: true,
+  // destructiveHint and idempotentHint are meaningful only when readOnlyHint is false.
+  // https://modelcontextprotocol.io/specification/2026-07-28/schema#toolannotations
+  destructiveHint: false,
+  idempotentHint: true,
   openWorldHint: true,
 };
 
 export const description = `
+    DEPRECATED: This tool is deprecated. Prefer brave_answers for new work — it returns a finished, web-grounded answer in a single call (no web-search + key + poll workflow). This tool remains available for existing Pro AI subscribers.
+
     Retrieves AI-generated summaries of web search results using Brave's Summarizer API. This tool processes search results to create concise, coherent summaries of information gathered from multiple sources.
 
     When to use:
@@ -39,24 +47,12 @@ export const execute = async (params: SummarizerQueryParams) => {
         text: 'Unable to retrieve a Summarizer summary.',
       });
     } else {
-      const summaryText = summary
-        .map((summary_part) => {
-          if (summary_part.type === 'token') {
-            return summary_part.data;
-          } else if (summary_part.type === 'inline_reference') {
-            return ` (${summary_part.data?.url})`;
-          } else {
-            return '';
-          }
-        })
-        .join('');
-
       response.content.push({
         type: 'text' as const,
-        text: summaryText,
+        text: formatSummary(summary),
       });
     }
-  } catch (error) {
+  } catch {
     response.isError = true;
     response.content.push({
       type: 'text' as const,
@@ -93,7 +89,7 @@ const pollForSummary = async (
       if (response.status === 'complete') {
         result = response;
       }
-    } catch (error) {
+    } catch {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
 
